@@ -1,0 +1,197 @@
+@page "/siparisler"
+@rendermode InteractiveServer
+
+<div class="container mt-4" style="max-width: 1000px; font-family: sans-serif;">
+    <h2 class="text-center mb-4">📦 Akıllı Sipariş Dağıtım ve Rota Merkezi</h2>
+
+    <div class="row text-center mb-4">
+        <div class="col-md-6">
+            <div class="p-3 bg-light border rounded shadow-sm">
+                <h5>⏳ Bekleyen / Hazırlanan Sipariş</h5>
+                <h3 class="text-warning">@BekleyenSiparisSayisi</h3>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="p-3 bg-light border rounded shadow-sm">
+                <h5>🟢 Teslim Edilen Toplam Sipariş</h5>
+                <h3 class="text-success">@TeslimEdilenSiparisSayisi</h3>
+            </div>
+        </div>
+    </div>
+
+    <div class="card p-4 mb-4 shadow-sm">
+        <h4 class="mb-3">🆕 Yeni Restoran Siparişi Girişi</h4>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label text-muted small fw-bold mb-1">Restoran / Mağaza Adı</label>
+                <input type="text" class="form-control" @bind="RestoranInput" />
+            </div>
+            <div class="col-md-5">
+                <label class="form-label text-muted small fw-bold mb-1">Müşteri Teslimat Adresi</label>
+                <input type="text" class="form-control" @bind="AdresInput" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label text-muted small fw-bold mb-1">Hayali Rota Mesafesi (KM)</label>
+                <input type="number" step="0.1" class="form-control" @bind="MesafeInput" />
+            </div>
+            <div class="col-md-12 text-end">
+                <button class="btn btn-success px-5" @onclick="SiparisKaydet">Siparişi Kaydet ve Kurye Ata</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card p-4 shadow-sm">
+        <h4 class="mb-3">📜 Canlı Lojistik Sipariş Takip Listesi</h4>
+        @if (SiparislerListesi.Count == 0)
+        {
+            <p class="text-muted text-center">Sistemde henüz işlem gören aktif sipariş bulunmamaktadır.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Sipariş ID</th>
+                            <th>🏪 Restoran</th>
+                            <th>📍 Teslimat Adresi</th>
+                            <th>🗺️ Mesafe</th>
+                            <th>🛵 Atanan Kurye</th>
+                            <th>🚨 Sipariş Durumu</th>
+                            <th>Aksiyon</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var siparis in SiparislerListesi.OrderByDescending(s => s.OlusturmaTarihi))
+                        {
+                            var kurye = KuryelerListesi.FirstOrDefault(k => k.Id == siparis.AtananKuryeId);
+                            <tr>
+                                <td class="fw-bold text-secondary">#@siparis.Id</td>
+                                <td class="fw-bold">@siparis.RestoranAdi</td>
+                                <td>@siparis.MusteriAdres</td>
+                                <td><span class="badge bg-secondary">@siparis.MesafeKm KM</span></td>
+                                <td class="fw-bold text-primary">
+                                    @(kurye != null ? kurye.AdSoyad : "⏳ Uygun Kurye Bekleniyor")
+                                </td>
+                                <td>
+                                    <span class="badge @ObtainSiparisBadgeClass(siparis.Durum)">
+                                        @siparis.Durum
+                                    </span>
+                                </td>
+                                <td>
+                                    @if (siparis.Durum == "Hazırlanıyor" && siparis.AtananKuryeId != null)
+                                    {
+                                        <button class="btn btn-sm btn-warning" @onclick='() => DurumGuncelle(siparis.Id, "Yolda")'>🚀 Yola Çıkar</button>
+                                    }
+                                    else if (siparis.Durum == "Yolda")
+                                    {
+                                        <button class="btn btn-sm btn-success" @onclick='() => DurumGuncelle(siparis.Id, "Teslim Edildi")'>✅ Teslim Et</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">İşlem Tamamlandı</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Siparis> SiparislerListesi = new List<Siparis>();
+    private List<Kurye> KuryelerListesi = new List<Kurye>();
+
+    private string RestoranInput { get; set; } = string.Empty;
+    private string AdresInput { get; set; } = string.Empty;
+    private decimal MesafeInput { get; set; }
+
+    private int BekleyenSiparisSayisi => SiparislerListesi.Count(s => s.Durum != "Teslim Edildi");
+    private int TeslimEdilenSiparisSayisi => SiparislerListesi.Count(s => s.Durum == "Teslim Edildi");
+
+    protected override void OnInitialized()
+    {
+        VerileriYukle();
+    }
+
+    private void VerileriYukle()
+    {
+        using var db = new LojistikDbContext();
+        SiparislerListesi = db.Siparisler.ToList();
+        KuryelerListesi = db.Kuryeler.ToList();
+    }
+
+    private void SiparisKaydet()
+    {
+        if (string.IsNullOrWhiteSpace(RestoranInput) || string.IsNullOrWhiteSpace(AdresInput) || MesafeInput <= 0) return;
+
+        using var db = new LojistikDbContext();
+        
+        var bostaKuryeler = db.Kuryeler.Where(k => k.Durum == "Boşta").ToList();
+        int? atananId = null;
+
+        if (bostaKuryeler.Count > 0)
+        {
+            var kurye = bostaKuryeler.First();
+            atananId = kurye.Id;
+            kurye.Durum = "Dağıtımda";
+            db.Kuryeler.Update(kurye);
+        }
+
+        var yeniSiparis = new Siparis
+        {
+            RestoranAdi = RestoranInput,
+            MusteriAdres = AdresInput,
+            MesafeKm = MesafeInput,
+            AtananKuryeId = atananId,
+            Durum = atananId != null ? "Hazırlanıyor" : "Kurye Bekleniyor",
+            OlusturmaTarihi = DateTime.Now
+        };
+
+        db.Siparisler.Add(yeniSiparis);
+        db.SaveChanges();
+
+        VerileriYukle();
+
+        RestoranInput = string.Empty;
+        AdresInput = string.Empty;
+        MesafeInput = 0;
+    }
+
+    private void DurumGuncelle(int id, string yeniDurum)
+    {
+        using var db = new LojistikDbContext();
+        var siparis = db.Siparisler.FirstOrDefault(s => s.Id == id);
+        
+        if (siparis != null)
+        {
+            siparis.Durum = yeniDurum;
+            db.Siparisler.Update(siparis);
+
+            if (yeniDurum == "Teslim Edildi" && siparis.AtananKuryeId != null)
+            {
+                var kurye = db.Kuryeler.FirstOrDefault(k => k.Id == siparis.AtananKuryeId);
+                if (kurye != null)
+                {
+                    kurye.Durum = "Boşta";
+                    db.Kuryeler.Update(kurye);
+                }
+            }
+
+            db.SaveChanges();
+            VerileriYukle();
+        }
+    }
+
+    private string ObtainSiparisBadgeClass(string durum) => durum switch
+    {
+        "Kurye Bekleniyor" => "bg-secondary text-white",
+        "Hazırlanıyor" => "bg-info text-dark",
+        "Yolda" => "bg-warning text-dark",
+        "Teslim Edildi" => "bg-success text-white",
+        _ => "bg-light text-dark"
+    };
+}
